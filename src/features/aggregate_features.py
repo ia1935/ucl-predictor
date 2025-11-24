@@ -45,7 +45,8 @@ def aggregate_players(players_df):
     players = players_df.copy()
     players.columns = [c.strip() for c in players.columns]
 
-    club_col = safe_col(players, ["club", "team_name", "team", "teamname"]) or "club"
+    # prefer explicit team id/name columns commonly found in the UCL dataset
+    club_col = safe_col(players, ["club", "team_name", "team", "teamname", "id_team"]) or "club"
 
     # helper to map common stat names to dataset columns
     col_map = {
@@ -135,13 +136,63 @@ def aggregate_players(players_df):
 
 
 def merge_team_features_into_matches(matches_df, team_features):
+    import glob
     matches = matches_df.copy()
-    # try common match column names
+    # prefer numeric id-based joins when available (home_team_id / away_team_id)
+    home_id_col = safe_col(matches, ["home_team_id", "home_id", "home_club_id"])
+    away_id_col = safe_col(matches, ["away_team_id", "away_id", "away_club_id"])
+
+    # try to enrich team_features with textual team names if a teams CSV exists
+    team_features = team_features.copy()
+    teams_files = glob.glob(os.path.join("data", "**", "teams*.csv"), recursive=True)
+    if teams_files:
+        try:
+            teams_map = pd.read_csv(teams_files[0])
+            if "team_id" in teams_map.columns and "team" in teams_map.columns:
+                id_to_name = teams_map.set_index("team_id")["team"].to_dict()
+                team_features["team_name"] = team_features["team"].map(id_to_name)
+        except Exception:
+            pass
+
+    if home_id_col and away_id_col and "team" in team_features.columns:
+        # coerce to string to avoid int/object mismatches
+        matches[home_id_col] = matches[home_id_col].astype(str)
+        matches[away_id_col] = matches[away_id_col].astype(str)
+
+        tf_home = team_features.copy()
+        tf_away = team_features.copy()
+        tf_home["team"] = tf_home["team"].astype(str)
+        tf_away["team"] = tf_away["team"].astype(str)
+
+        matches = matches.merge(tf_home.add_prefix("home_"), left_on=home_id_col, right_on="home_team", how="left")
+        matches = matches.merge(tf_away.add_prefix("away_"), left_on=away_id_col, right_on="away_team", how="left")
+        return matches
+
+    # fallback: name-based join
     home_col = safe_col(matches, ["home_team", "home", "home_club"]) or "home_team"
     away_col = safe_col(matches, ["away_team", "away", "away_club"]) or "away_team"
 
-    matches = matches.merge(team_features.add_prefix("home_"), left_on=home_col, right_on="home_team", how="left")
-    matches = matches.merge(team_features.add_prefix("away_"), left_on=away_col, right_on="away_team", how="left")
+    if home_col in matches.columns:
+        matches[home_col] = matches[home_col].astype(str)
+    if away_col in matches.columns:
+        matches[away_col] = matches[away_col].astype(str)
+
+    tf_home = team_features.copy()
+    tf_away = team_features.copy()
+
+    # if we have a mapped textual name, prefer that for joining
+    if "team_name" in tf_home.columns and tf_home["team_name"].notnull().any():
+        tf_home["join_name"] = tf_home["team_name"].astype(str)
+        tf_away["join_name"] = tf_away["team_name"].astype(str)
+        matches = matches.merge(tf_home.add_prefix("home_"), left_on=home_col, right_on="home_join_name", how="left")
+        matches = matches.merge(tf_away.add_prefix("away_"), left_on=away_col, right_on="away_join_name", how="left")
+        return matches
+
+    # last resort: stringified numeric team id
+    tf_home["team"] = tf_home["team"].astype(str)
+    tf_away["team"] = tf_away["team"].astype(str)
+    matches = matches.merge(tf_home.add_prefix("home_"), left_on=home_col, right_on="home_team", how="left")
+    matches = matches.merge(tf_away.add_prefix("away_"), left_on=away_col, right_on="away_team", how="left")
     return matches
 
 
@@ -168,7 +219,26 @@ def main(args=None):
         raise FileNotFoundError(f"Players CSV not found at '{players_csv}'")
 
     print("Loading players from:", players_csv)
+    # load base players file and try to merge any per-player stat files that live in the same folder
     players = pd.read_csv(players_csv)
+    base_dir = os.path.dirname(players_csv)
+    # merge additional CSVs by `id_player` if present (e.g. goals_data.csv, attempts_data.csv, attacking_data.csv)
+    for f in glob.glob(os.path.join(base_dir, "*.csv")):
+        if os.path.abspath(f) == os.path.abspath(players_csv):
+            continue
+        try:
+            df = pd.read_csv(f)
+        except Exception:
+            continue
+        if "id_player" in df.columns:
+            # avoid duplicating player name/id columns
+            drop_cols = [c for c in ["player_name", "player_image", "nationality"] if c in df.columns]
+            try:
+                players = players.merge(df.drop(columns=drop_cols, errors="ignore"), on="id_player", how="left")
+                print("Merged stats from:", f)
+            except Exception:
+                # fallback: skip problematic merges
+                print("Skipping merge for:", f)
 
     team_features = aggregate_players(players)
     os.makedirs(os.path.dirname(parsed.out_team), exist_ok=True)
@@ -178,11 +248,33 @@ def main(args=None):
     # merge with matches if provided
     if parsed.matches and os.path.exists(parsed.matches):
         print("Loading matches from:", parsed.matches)
-        matches = pd.read_csv(parsed.matches, parse_dates=[safe_col(pd.read_csv(parsed.matches, nrows=1), ["date"]) or "date"], infer_datetime_format=True)
+        # safely detect a date column without forcing parse_dates to a missing name
+        preview = pd.read_csv(parsed.matches, nrows=1)
+        date_col = safe_col(preview, ["date", "match_date", "kickoff", "kickoff_time", "datetime"]) 
+        if date_col:
+            matches = pd.read_csv(parsed.matches, parse_dates=[date_col])
+        else:
+            matches = pd.read_csv(parsed.matches)
         merged = merge_team_features_into_matches(matches, team_features)
         os.makedirs(os.path.dirname(parsed.out_matches), exist_ok=True)
         merged.to_csv(parsed.out_matches, index=False)
         print("Saved merged matches to:", parsed.out_matches)
+        # produce a filtered version keeping only rows where both home and away team ids exist in team_features
+        try:
+            team_ids = set(team_features['team'].astype(int).tolist())
+            # prefer numeric id columns in matches
+            hid = safe_col(matches, ['home_team_id', 'home_id', 'home_club_id'])
+            aid = safe_col(matches, ['away_team_id', 'away_id', 'away_club_id'])
+            if hid and aid:
+                mask = matches[hid].isin(team_ids) & matches[aid].isin(team_ids)
+                filtered = merged[mask].copy()
+                out_filtered = parsed.out_matches.replace('.csv', '_filtered.csv')
+                filtered.to_csv(out_filtered, index=False)
+                print(f"Saved filtered merged matches to: {out_filtered} (rows kept: {len(filtered)} of {len(merged)})")
+            else:
+                print('Match id columns not found; skipping filtered output.')
+        except Exception:
+            print('Could not create filtered matches file due to id coercion error; skipping.')
     else:
         print("Matches file not found or not provided; skipping merge.")
 
