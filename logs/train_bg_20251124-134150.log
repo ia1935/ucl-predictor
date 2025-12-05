@@ -1,0 +1,20 @@
+nohup: ignoring input
+/home/imran/Repositories/UclPredictor/.venv/lib/python3.12/site-packages/sklearn/impute/_base.py:653: UserWarning: Skipping features without any observed values: ['delta_top11_assists' 'delta_team_y' 'delta_team_passes_completed'
+ 'delta_team_pass_acc' 'delta_team_avg_top_speed' 'delta_top11_avg_age'
+ 'delta_top11_goals' 'delta_team_passes_attempted' 'delta_team_minutes'
+ 'delta_top11_avg_pass_acc' 'delta_team_name' 'delta_team_goals'
+ 'delta_team_assists']. At least one non-missing value is needed for imputation with strategy='median'.
+  warnings.warn(
+/home/imran/Repositories/UclPredictor/.venv/lib/python3.12/site-packages/sklearn/impute/_base.py:653: UserWarning: Skipping features without any observed values: ['delta_top11_assists' 'delta_team_y' 'delta_team_passes_completed'
+ 'delta_team_pass_acc' 'delta_team_avg_top_speed' 'delta_top11_avg_age'
+ 'delta_top11_goals' 'delta_team_passes_attempted' 'delta_team_minutes'
+ 'delta_top11_avg_pass_acc' 'delta_team_name' 'delta_team_goals'
+ 'delta_team_assists']. At least one non-missing value is needed for imputation with strategy='median'.
+  warnings.warn(
+/home/imran/Repositories/UclPredictor/.venv/lib/python3.12/site-packages/sklearn/linear_model/_logistic.py:1272: FutureWarning: 'multi_class' was deprecated in version 1.5 and will be removed in 1.8. From then on, it will always use 'multinomial'. Leave it to its default value to avoid this warning.
+  warnings.warn(
+/home/imran/Repositories/UclPredictor/.venv/lib/python3.12/site-packages/xgboost/training.py:199: UserWarning: [13:41:52] WARNING: /workspace/src/learner.cc:790: 
+Parameters: { "use_label_encoder" } are not used.
+
+  bst.update(dtrain, iteration=i, fobj=obj)
+Training complete. Report written to reports/model_report.md

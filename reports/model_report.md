@@ -1,10 +1,10 @@
 # Baseline Model Report
 
 ## logreg
-- logloss: 0.6816
-- accuracy: 0.7143
+- logloss: 0.0169
+- accuracy: 1.0000
 
 ## xgb
-- logloss: 0.0384
+- logloss: 0.0010
 - accuracy: 1.0000
 
